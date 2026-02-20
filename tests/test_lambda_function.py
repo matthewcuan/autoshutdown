@@ -36,7 +36,7 @@ def test_active_connections_resets_counter(monkeypatch):
     monkeypatch.setattr(lambda_function, "get_state_table", lambda _name: object())
     monkeypatch.setattr(lambda_function, "get_instance_state", lambda _iid: "running")
     monkeypatch.setattr(
-        lambda_function, "check_ssh_connections", lambda _iid: (True, 2)
+        lambda_function, "check_ssh_connections", lambda _iid, **_kwargs: (True, 2)
     )
 
     reset_calls = []
@@ -57,7 +57,7 @@ def test_idle_below_threshold_updates_count(monkeypatch):
     monkeypatch.setattr(lambda_function, "get_state_table", lambda _name: object())
     monkeypatch.setattr(lambda_function, "get_instance_state", lambda _iid: "running")
     monkeypatch.setattr(
-        lambda_function, "check_ssh_connections", lambda _iid: (False, 0)
+        lambda_function, "check_ssh_connections", lambda _iid, **_kwargs: (False, 0)
     )
     monkeypatch.setattr(lambda_function, "get_idle_count", lambda _iid, _table: 1)
 
@@ -79,7 +79,7 @@ def test_threshold_reached_suppresses_stop_when_disabled(monkeypatch):
     monkeypatch.setattr(lambda_function, "get_state_table", lambda _name: object())
     monkeypatch.setattr(lambda_function, "get_instance_state", lambda _iid: "running")
     monkeypatch.setattr(
-        lambda_function, "check_ssh_connections", lambda _iid: (False, 0)
+        lambda_function, "check_ssh_connections", lambda _iid, **_kwargs: (False, 0)
     )
     monkeypatch.setattr(lambda_function, "get_idle_count", lambda _iid, _table: 1)
 
@@ -107,7 +107,7 @@ def test_threshold_reached_stops_when_enabled(monkeypatch):
     monkeypatch.setattr(lambda_function, "get_state_table", lambda _name: object())
     monkeypatch.setattr(lambda_function, "get_instance_state", lambda _iid: "running")
     monkeypatch.setattr(
-        lambda_function, "check_ssh_connections", lambda _iid: (False, 0)
+        lambda_function, "check_ssh_connections", lambda _iid, **_kwargs: (False, 0)
     )
     monkeypatch.setattr(lambda_function, "get_idle_count", lambda _iid, _table: 1)
 

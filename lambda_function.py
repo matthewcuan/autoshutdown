@@ -12,6 +12,10 @@ def get_config():
         "instance_id": os.environ["INSTANCE_ID"],
         "idle_threshold": int(os.environ.get("IDLE_THRESHOLD", "3")),
         "state_table": os.environ["STATE_TABLE"],
+        "ssm_max_wait_seconds": float(os.environ.get("SSM_MAX_WAIT_SECONDS", "15")),
+        "ssm_poll_interval_seconds": float(
+            os.environ.get("SSM_POLL_INTERVAL_SECONDS", "0.5")
+        ),
         "allow_stop": os.environ.get("ALLOW_STOP", "false").strip().lower()
         in {"1", "true", "yes", "on"},
     }
@@ -43,7 +47,42 @@ def get_instance_state(instance_id, ec2_client=None):
     return response["Reservations"][0]["Instances"][0]["State"]["Name"]
 
 
-def check_ssh_connections(instance_id, ssm_client=None):
+def _wait_for_command_invocation(
+    ssm_client, command_id, instance_id, max_wait_seconds, poll_interval_seconds
+):
+    terminal_statuses = {"Success", "Failed", "Cancelled", "TimedOut", "Cancelling"}
+    deadline = time.monotonic() + max_wait_seconds
+    last_error = None
+
+    while time.monotonic() < deadline:
+        try:
+            invocation = ssm_client.get_command_invocation(
+                CommandId=command_id, InstanceId=instance_id
+            )
+        except Exception as exc:
+            last_error = exc
+            time.sleep(poll_interval_seconds)
+            continue
+
+        status = invocation.get("Status")
+        if status in terminal_statuses:
+            return invocation
+
+        time.sleep(poll_interval_seconds)
+
+    if last_error:
+        print(f"Timed out waiting for SSM invocation after error: {last_error}")
+    else:
+        print("Timed out waiting for SSM invocation result.")
+    return None
+
+
+def check_ssh_connections(
+    instance_id,
+    ssm_client=None,
+    max_wait_seconds=15,
+    poll_interval_seconds=0.5,
+):
     """
     Check for active SSH connections on the instance.
     
@@ -64,12 +103,23 @@ def check_ssh_connections(instance_id, ssm_client=None):
     
     command_id = response["Command"]["CommandId"]
     
-    # Wait for command to complete
-    time.sleep(2)
-    invocation = ssm_client.get_command_invocation(
-        CommandId=command_id,
-        InstanceId=instance_id
+    invocation = _wait_for_command_invocation(
+        ssm_client=ssm_client,
+        command_id=command_id,
+        instance_id=instance_id,
+        max_wait_seconds=max_wait_seconds,
+        poll_interval_seconds=poll_interval_seconds,
     )
+
+    if invocation is None:
+        # Fail safe: if we cannot verify connection state, do not advance toward stop.
+        return True, 0
+
+    status = invocation.get("Status")
+    if status != "Success":
+        stderr = invocation.get("StandardErrorContent", "").strip()
+        print(f"SSM command completed with status={status}. stderr={stderr}")
+        return True, 0
     
     output = invocation.get("StandardOutputContent", "").strip()
     print("Command output:", output)
@@ -120,6 +170,8 @@ def lambda_handler(event, context):
     instance_id = config["instance_id"]
     idle_threshold = config["idle_threshold"]
     allow_stop = config["allow_stop"]
+    ssm_max_wait_seconds = config["ssm_max_wait_seconds"]
+    ssm_poll_interval_seconds = config["ssm_poll_interval_seconds"]
     state_table = get_state_table(config["state_table"])
 
     state = get_instance_state(instance_id)
@@ -130,7 +182,11 @@ def lambda_handler(event, context):
         return {"status": f"skipped-{state}"}
     
     # Check for active connections
-    has_connections, connection_count = check_ssh_connections(instance_id)
+    has_connections, connection_count = check_ssh_connections(
+        instance_id,
+        max_wait_seconds=ssm_max_wait_seconds,
+        poll_interval_seconds=ssm_poll_interval_seconds,
+    )
     
     if has_connections:
         print("Active connections detected.")
