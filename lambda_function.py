@@ -122,7 +122,8 @@ def lambda_handler(event, context):
     # Stop the instance
     stop_instance(INSTANCE_ID)
     reset_idle_count(INSTANCE_ID)
-    
+   
+    # THIS IS A TEST
     return {
         "status": "stopped",
         "idle_count": idle_count
